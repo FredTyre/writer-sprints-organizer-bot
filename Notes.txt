@@ -1,0 +1,9 @@
+Adding scopes to the slack bot means reinstall the bot to workspace
+
+YouTube Video to get things started...
+https://www.youtube.com/watch?v=KJ5bFv-IRFM&t=458s
+
+https://api.slack.com/apps
+
+Feature Ideas Here
+   https://github.com/pengowray/sprinto/wiki
