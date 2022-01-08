@@ -7,3 +7,5 @@ https://api.slack.com/apps
 
 Feature Ideas Here
    https://github.com/pengowray/sprinto/wiki
+
+http://624e-173-23-128-197.ngrok.io/slack/events

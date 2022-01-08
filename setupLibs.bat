@@ -1,7 +1,6 @@
-J:
-cd J:\One5hot76\softwareDev\slackBots
-PATH=C:\Python39\Scripts\;C:\Python39\;C:\Users\One5hot76\AppData\Roaming\Python\Python39\Scripts;%PATH%
-python -m pip install --upgrade pip --user
+C:
+cd C:\Users\One5hot76\Documents\GitHub\writer-sprints-organizer-bot
+python -m pip install --upgrade pip
 pip install slackclient
 pip install python-dotenv
 pip install flask
