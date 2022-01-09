@@ -8,4 +8,7 @@ https://api.slack.com/apps
 Feature Ideas Here
    https://github.com/pengowray/sprinto/wiki
 
-http://624e-173-23-128-197.ngrok.io/slack/events
+http://68eb-173-23-128-197.ngrok.io/slack/events
+http://68eb-173-23-128-197.ngrok.io/message-count
+
+https://www.youtube.com/watch?v=5gxSHuscNS8&list=PLzMcBGfZo4-kqyzTzJWCV6lyK-ZMYECDc&index=7

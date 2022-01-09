@@ -2,11 +2,14 @@ import slack
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from flask import Flask
+from flask import Flask, request, Response
 from slackeventsapi import SlackEventAdapter
 import hmac
 import hashlib
 import time
+import string
+from datetime import datetime, timedelta
+from math import floor
 
 env_path = Path('.') / '.env'
 load_dotenv(dotenv_path = env_path)
@@ -19,6 +22,74 @@ client = slack.WebClient(token=os.environ['SLACK_TOKEN'])
 client.chat_postMessage(channel='#test', text="Hello!")
 
 BOT_ID = client.api_call("auth.test")['user_id']
+
+message_counts = {}
+welcome_messages = {}
+
+BAD_WORDS = ['shit']
+
+SCHEDULED_MESSAGES = [
+    {'text': 'First message', 'post_at': floor((datetime.now() + timedelta(seconds=50)).timestamp()), 'channel': 'C02T4T5GSMT'},
+    {'text': 'Second message', 'post_at': floor((datetime.now() + timedelta(seconds=60)).timestamp()), 'channel': 'C02T4T5GSMT'}
+]
+
+scheduled_ids = []
+
+class WelcomeMessage:
+    START_TEXT = {
+        'type': 'section',
+        'text': {
+            'type': 'mrkdwn',
+            'text': (
+                'Welcome to this awesome channel! \n\n'
+                '*Get started by completing the tasks.*'
+            )
+        }
+    }
+
+    DIVIDER = {'type': 'divider'}
+
+    def __init__(self, channel):
+        self.channel = channel
+        self.icon_emoji = ':robot_face:'
+        self.timestamp = ''
+        self.completed = False
+
+    def get_message(self):
+        return {
+            'ts': self.timestamp,
+            'channel': self.channel,
+            'username': 'Welcome Robot',
+            'icon_emoji': self.icon_emoji,
+            'blocks': [
+                self.START_TEXT,
+                self.DIVIDER,
+                self._get_reaction_task()
+            ]
+        }
+
+    def _get_reaction_task(self):
+        checkmark = ':white_check_mark:'
+        if not self.completed:
+            checkmark = ':white_large_square:'
+
+        text = f'{checkmark} *React to this message!*'
+
+        return {'type': 'section', 'text': {'type': 'mrkdwn', 'text': text}}
+
+def send_welcome_message(channel, user):
+    if channel not in welcome_messages:
+        welcome_messages[channel] = {}
+    
+    if user in welcome_messages[channel]:
+        return
+    
+    welcome = WelcomeMessage(channel)
+    message = welcome.get_message()
+    response = client.chat_postMessage(**message)
+    welcome.timestamp = response['ts']
+
+    welcome_messages[channel][user] = welcome
 
 def verify_request(request):
     slack_signing_secret_in_bytes = bytes(os.environ['SIGNING_SECRET'], "utf-8")
@@ -43,16 +114,101 @@ def verify_request(request):
         print("Verification failed. Signature invalid.")
         return False
 
+def list_scheduled_messages(channel, ts=None):
+    response = client.chat_scheduledMessages_list(channel=channel)
+    messages = response.data.get('scheduled_messages')
+    ids = []
+    for msg in messages:
+        if ts is None:
+            client.chat_postMessage(channel=channel, thread_ts = ts, text=msg.get('post_at'))
+        ids.append(msg.get('id'))
+
+    return ids
+
+def schedule_messages(messages):
+    ids = []
+    for msg in messages:
+        response = client.chat_scheduleMessage(channel=msg['channel'], post_at=msg['post_at'], text=msg['text']).data
+        id_ = response.get('scheduled_message_id')
+        ids.append(id_)
+    
+    return ids
+
+def schedule_message(channel, post_at, message):
+    response = client.chat_scheduleMessage(channel=channel, post_at=post_at, text=message).data
+    id_ = response.get('scheduled_message_id')
+    scheduled_ids.append(id_)
+
+def delete_scheduled_messages(ids, channel):
+    for _id in ids:
+        try:
+            client.chat_deleteScheduledMessage(
+                channel=channel, scheduled_message_id=_id)
+        except Exception as e:
+            print(e)
+
+
+def check_if_bad_words(message):
+    msg = message.lower()
+    msg = msg.translate(str.maketrans('', '', string.punctuation))
+
+    return any(word in msg for word in BAD_WORDS)
+
 @slack_event_adapter.on('message')
 def message(payload):
-    print(payload)
     event = payload.get('event', {})
     channel_id = event.get('channel')
     user_id = event.get('user')
     text = event.get('text')
+    ts = event.get('ts')
 
-    if BOT_ID != user_id:
-        client.chat_postMessage(channel=channel_id, text=text)
+    if user_id != None and BOT_ID != user_id:
+        if user_id in message_counts:
+            message_counts[user_id] += 1
+        else:
+            message_counts[user_id] = 1
 
-if __name__ == "__main__":
+        if text.lower() == 'start':
+            send_welcome_message(f'@{user_id}', user_id)
+        elif text.lower() == 'channel':
+            client.chat_postMessage(channel=channel_id, thread_ts = ts, text=channel_id)
+        elif text.lower() == 'scheduled':
+            ids = list_scheduled_messages(channel_id, ts)
+        elif text.lower() == 'schedule':
+            schedule_message(channel=channel_id, post_at=floor((datetime.now() + timedelta(seconds=10)).timestamp()), message="Scheduling a message...")
+        elif check_if_bad_words(text):
+            client.chat_postMessage(channel=channel_id, thread_ts = ts, text='THAT IS A BAD WORD!')
+        
+
+@slack_event_adapter.on('reaction_added')
+def reaction(payload):
+    event = payload.get('event', {})
+    channel_id = event.get('item', {}).get('channel')
+    user_id = event.get('user')
+
+    if f'@{user_id}' not in welcome_messages:
+        return
+
+    welcome = welcome_messages[f'@{user_id}'][user_id]
+    welcome.completed = True
+    welcome.channel = channel_id
+    message = welcome.get_message()
+    updated_message = client.chat_update(**message)
+    welcome.timestamp = updated_message['ts']
+
+
+@app.route('/message-count', methods=['POST'])
+def message_count():
+    data = request.form
+    user_id = data.get('user_id')
+    channel_id = data.get('channel_id')
+    message_count = message_counts.get(user_id, 0)
+
+    client.chat_postMessage(channel=channel_id, text=f"Message Count: {message_count}")
+    return Response(), 200
+
+if __name__ == "__main__": 
+    schedule_messages(SCHEDULED_MESSAGES)
+    ids = list_scheduled_messages('C02T4T5GSMT')
+    delete_scheduled_messages(ids, 'C02T4T5GSMT')
     app.run(debug=True)
